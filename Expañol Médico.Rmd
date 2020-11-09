@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(cowplot)
 theme_set(theme_cowplot())
+library(sna)
 ```
 
 # Export from Anki
@@ -35,7 +36,53 @@ tag_names <- data.frame(tag_names = raw_text$V3)
 ```
 
 
-# Clean Data
+# Data Cleaning
+
+```{r}
+# formatting variables
+
+  # lecture factor formatting
+  fct_lecture <- function(x_tag){
+    case_when(
+      str_detect(x_tag, pattern = "^0") ~ 1,
+      str_detect(x_tag, pattern = "^1") ~ 2,
+      str_detect(x_tag, pattern = "^3") ~ 3,
+      str_detect(x_tag, pattern = "^4") ~ 4,
+      str_detect(x_tag, pattern = "^5") ~ 5,
+      str_detect(x_tag, pattern = "^6") ~ 6
+      ) %>% 
+      factor(
+        levels = 1:6,
+        labels = c("Jerarquía", "Historial Médico", "Signos Vitales", "Nervios Craneales", "Neurológico", "Musculoesquelético")
+      )
+  }
+
+  # format tag names
+  prettify_tags <- function(nasty_tag){
+    
+    nasty_tag %>% 
+      
+      # remove any quantity of repeating numbers and periods in front of the tag, 
+      #   then remove first underscore
+      str_remove(pattern = "^[\\d+\\.+]+\\_") %>% 
+      
+      # replace middle underscores with spaces
+      str_replace_all(pattern = "\\_", replacement = " ") %>% 
+      
+      # capitalize first word
+      str_to_title() %>% 
+      
+      # remove nervios craneales roman numerals and abbreviation
+      str_remove_all(pattern = "Nc |I |Ii |Iii |Iv |V |Vi |Vii |Viii |Ix |X |Xi |Xii ")
+
+  }
+  # prettify_tags("2.3_this_is_a_tag")
+  # prettify_tags("2.3.3.2.5_this_is_a_tag")
+  # prettify_tags("4.8_nc_IX_X_XII_músculos_paladar_lengua")
+```
+
+
+## Dataframes
 
 ```{r}
 # each row is a card, split tags into individual columns
@@ -61,76 +108,352 @@ df_tags <- df_cards %>%
   dplyr::arrange(tag_id) %>% 
   # create nodes for each deck the cards come from
   dplyr::mutate(
-    lecture = case_when(
-      str_detect(tag_name, pattern = "^0") ~ 1,
-      str_detect(tag_name, pattern = "^1") ~ 2,
-      str_detect(tag_name, pattern = "^3") ~ 3,
-      str_detect(tag_name, pattern = "^4") ~ 4,
-      str_detect(tag_name, pattern = "^5") ~ 5,
-      str_detect(tag_name, pattern = "^6") ~ 6
-    ) %>% factor(levels = 1:6, labels = c("Jerarquía", "Historial Médico", "Signos Vitales", "Nervios Craneales", "Examen Neurológico", "Examen Musculoesquelético"))
+    lecture_id = str_extract(tag_name, pattern = "^[\\d+\\.+]+"),
+    lecture_name = fct_lecture(lecture_id),
+    tag_name = prettify_tags(tag_name)
   )
+```
+
+```{r}
+# count numbers of tags, cards, and lectures
+n_tag     <- length(unique(df_tags$tag_name))
+m_card    <- length(unique(df_tags$card_id))
+k_lecture <- length(unique(df_tags$lecture_name))
 ```
 
 The following will be used to visualize the network  
 
-* Each **tag** (n = `r length(unique(df_tags$tag_name))`) is a **node**  
-* Each **card** (n = `r length(unique(df_tags$card_id))`) represent **edges** or links between tags
-* Each **lecture** (n = `r length(unique(df_tags$lecture))`) will be indicated by a different **color**
+* Each **tag** (n = `r n_tag`) is a **node**  
+* Each **card** (m = `r m_card`) represent **edges** or links between tags
+* Each **lecture** (k = `r k_lecture`) will be indicated by a different **color**
 
 
-# Node Graph
+## Node Matrix{.tabset}
+
+Node matrix with weights
+
+### Tags
+
+How many cards are there per tag?
+
+Note, some tags had the same name, but were from different lectures. When removing the tag ID number, these tags are associated with multiple lectures.
 
 ```{r}
-# show number of tags identified within each lecture
-df_tags %>% 
-  ggplot() +
-  geom_bar(aes(x = lecture)) +
-  scale_y_continuous(limits = c(0,300)) +
-  theme(
-    axis.text.x = element_text(angle = 20, hjust = 1)
-  )
+# node matrix of tag id, tag names, card weights
+node_tags_weight <- df_tags %>% 
+  group_by(tag_id, tag_name, lecture_id) %>% 
+  summarise(card_weight = n(), .groups = "drop") %>% 
+  # create nodes for each deck the cards come from
+  dplyr::mutate(lecture_name = fct_lecture(lecture_id))
+
+# weight by tag, because some repeat tag names by different lecture
+node_tags_weight_order <- df_tags %>% group_by(tag_name) %>% summarise(tag_weight = n(), .groups = "drop")
+# node_tags_weight_order %>% glimpse
+
+# join the tag weights for sorting plot
+node_tags_weight <- node_tags_weight %>% left_join(node_tags_weight_order, by = "tag_name")
+node_tags_weight %>% glimpse
 ```
 
-
-# Routes Graph
-
-## Edge List
-
 ```{r}
-
-```
-
-
-```{r}
-# library(igraph)
-# routes_igraph <- graph_from_data_frame(d = edges, vertices = nodes, directed = TRUE)
-# routes_igraph_tidy <- as_tbl_graph(routes_igraph)
-# 
-# ggraph(routes_igraph, layout = "linear") + 
-#   geom_edge_arc(aes(width = weight), alpha = 0.8) + 
-#   scale_edge_width(range = c(0.2, 2)) +
-#   geom_node_text(aes(label = label)) +
-#   labs(edge_width = "Letters") +
-#   theme_graph()
-```
-
-# network
-
-```{r}
-# library(network)
-# nw_tags <- network(df_tags, )
-# plot(nw_tags)
+# node_tags_weight %>% glimpse
+node_tags_weight %>% 
+  ggplot(aes(x = fct_reorder(tag_name, tag_weight), y = card_weight, fill = lecture_name)) +
+  geom_col() +
+  xlab(paste0("Tags (n = ", n_tag, ")")) +
+  ylab(paste0("Cards (m = ", m_card, ")")) +
+  theme(axis.text.y = element_text(size = 5, hjust = 1)) +
+  coord_flip() +
+  theme(legend.position = "right", legend.title = element_blank(), legend.text = element_text(size = 8))
 ```
 
 
 
-# 7.1 Interactive plots of static networks
+### Cards
 
-We will start from plots of static network portraying a single time point (or an aggregated time period).
+How many tags are there per card?
+
+```{r}
+# node matrix of card id and tag weights
+node_cards_weight <- df_tags %>% 
+  group_by(card_id) %>% 
+  summarise(tag_weight = n(), .groups = "drop")
+node_cards_weight %>% glimpse
+```
+
+```{r}
+# node_cards_weight %>% glimpse
+node_cards_weight %>% 
+  ggplot(aes(x = tag_weight)) +
+  geom_histogram(binwidth = 1) +
+  ylab(paste0("Cards (m = ", m_card, ")")) +
+  xlab(paste0("Tags (n = ", n_tag, ")")) +
+  scale_y_continuous(limits = c(0, 300), breaks = seq(0,300, 50))
+```
+
+## Edge Matrix
+
+```{r}
+# how to get pairwise comparisons of a variable within each group
+# https://intellipaat.com/community/45798/create-combination-of-all-variables-within-a-group
+
+# create columns with pairwise comparisons
+# but there is directionality and redundancy
+combo_messy <- df_tags %>%
+  dplyr::group_by(card_id) %>%
+  dplyr::summarise(combo = list(purrr::cross_df(list(a = tag_name, b = tag_name))), .groups = "drop") %>% 
+  tidyr::unnest(combo)
+# combo_messy %>% nrow
+
+# sort rows of pairwise comparisons so can identify redundant groupings
+combo_clean <- combo_messy %>% dplyr::select(a, b) %>% 
+  t() %>% as.data.frame() %>% 
+  dplyr::mutate_all(sort) %>% t() %>% 
+  as.data.frame() %>% 
+  bind_cols(card_id = combo_messy$card_id, .)
+# combo_clean %>% nrow
+
+# clean pairwise comparisons and group to get weights
+edge_weights <- combo_clean %>% 
+  # remove comparisons with redundant pairings
+  dplyr::filter(V1 != V2) %>% 
+  # create single variable that pairs two comparisons
+  dplyr::mutate(pair_comp = paste(V1, V2, sep = "—")) %>% 
+  # get weights to find repeated associations
+  dplyr::group_by(pair_comp) %>% 
+  dplyr::summarise(weight = n(), .groups = "drop") %>% 
+  # separate pairwise comparisons into 2 variables
+  tidyr::separate(col = pair_comp, into = c("from", "to"), sep = "—", remove = TRUE)
+edge_weights %>% glimpse
+```
+
+# Style Plots
+
+```{r}
+tag.col <- c("Jerarquía" = 1, "Historial Médico" = 2, "Signos Vitales" = 3, "Nervios Craneales" = 4, "Neurológico" = 5, "Musculoesquelético" = 6)
+
+set_theme_params <- function(gg_obj){
+  gg_obj + 
+    theme(
+      legend.position = "right",
+      legend.title = element_blank(),
+      legend.text = element_text(size = 8)
+    )
+}
+```
+
+# Minimal Plot
+
+Notes from [Network visualization with R](https://kateto.net/sunbelt2019)
+
+Section [5.2 A ggraph package example (for ggplot2 users)](https://kateto.net/sunbelt2019#a-ggraph-package-example-for-ggplot2-users)
+
+Data for examples are [available here](http://www.kateto.net/wordpress/wp-content/uploads/2019/06/sunbelt2019.zip)
+
+```{r}
+ggraph(net, layout = 'linear') + 
+    geom_edge_arc(color = "orange", width=0.7) +
+    geom_node_point(size=5, color="gray50") +
+    theme_void()
+```
 
 
-As ndtv is part of the Statnet family, it will accept objects from the network package such as the one we created earlier (net3).
+
+# Network Visualization
+
+Excellent introduction to [Network Visualization with ggplot2](https://journal.r-project.org/archive/2017/RJ-2017-023/RJ-2017-023.pdf)
+
+I found the **geomnet** package to be the most useful and intuitive, as it is most similar to ggplot2 and is least reliant on background knowledge of network analysis.
+
+## ggnet2{.tabset}
+
+```{r, message=FALSE}
+# p.30
+library(GGally)
+library(network)
+```
+
+### Anki Tags
+
+```{r}
+# data step for both ggnet2 and ggnetwork
+# create undirected network
+tag.net <- network(edge_weights[,1:2], directed = FALSE) 
+tag.net # glance at network object
+
+## Network attributes:
+##  vertices = 58 
+##  directed = FALSE 
+##  hyper = FALSE 
+##  loops = FALSE 
+##  multiple = FALSE 
+##  bipartite = FALSE 
+##  total edges= 162 
+##    missing edges= 0 
+##    non-missing edges= 162 
+## Vertex attribute names: 
+##    vertex.names 
+## No edge attributes
+
+# assign lectures to the nodes
+tag.net %v% "node_color" <- as.integer(node_tags_weight$lecture_name)
+
+# assign weights to the edges of the network
+tag.net %e% "edge_weight" <- edge_weights$weight / 25
+
+set.seed(10052016)
+ggnet2(tag.net, mode = "kamadakawai", labelon = TRUE, 
+       edge.size = "edge_weight",
+       color = tag.col[ tag.net %v% "node_color" ],
+       size = 4, 
+       vjust = -0.6, label.size = 3)
+```
+
+### E.g. Madmen
+```{r}
+# make the data available
+data(madmen, package = 'geomnet')
+# data step for both ggnet2 and ggnetwork
+# create undirected network
+mm.net <- network(madmen$edges[, 1:2], directed = FALSE) 
+mm.net # glance at network object
+## Network attributes:
+##   vertices = 45
+##   directed = FALSE
+##   hyper = FALSE
+##   loops = FALSE
+##   multiple = FALSE
+##   bipartite = FALSE
+##   total edges= 39
+##     missing edges= 0
+## non-missing edges= 39 ##
+## Vertex attribute names:
+## vertex.names
+##
+## No edge attributes
+# create node attribute (gender) 
+rownames(madmen$vertices) <- madmen$vertices$label
+mm.net %v% "gender" <- as.character(
+  madmen$vertices[ network.vertex.names(mm.net), "Gender"] 
+)
+# gender color palette
+mm.col <- c("female" = "#ff69b4", "male" = "#0099ff") # create plot for ggnet2
+set.seed(10052016)
+ggnet2(mm.net, color = mm.col[ mm.net %v% "gender" ],
+labelon = TRUE, label.color = mm.col[ mm.net %v% "gender" ], size = 2, vjust = -0.6, mode = "kamadakawai", label.size = 3)
+```
+
+## geomnet{.tabset}
+
+```{r, message=FALSE}
+# also loads ggplot2
+library(geomnet)
+```
+
+### Anki Tag
+
+```{r}
+# data step: join the edge and node data with a fortify call 
+TAGnet <- suppressMessages(fortify(
+  as.edgedf(as.data.frame(edge_weights)), 
+  dplyr::select(node_tags_weight, tag_name, card_weight, lecture_name)
+  ))
+
+# layout algorithms available at
+# ?gplot.layout 
+
+# create plot
+set.seed(1332126)
+ggplot(data = TAGnet, 
+       aes(from_id = from_id, to_id = to_id, linewidth = weight/40,
+           label = str_wrap(from_id, 20) # wrap labels
+           )) + 
+  geom_net(aes(colour = lecture_name), layout.alg = "kamadakawai",
+           size = 2, labelon = TRUE, vjust = -0.6, ecolour = "grey60",
+           directed = FALSE, fontsize = 1, ealpha = 0.5,
+           repel = FALSE, labelcolour = "gray30"
+           ) +
+  # scale_colour_manual(values = c("#FF69B4", "#0099ff")) + 
+  xlim(c(-0.05, 1.05)) +
+  theme_net() %>% 
+  set_theme_params()
+```
+
+
+### E.g. Madmen
+
+```{r}
+# data step: join the edge and node data with a fortify call 
+MMnet <- fortify(as.edgedf(madmen$edges), madmen$vertices)
+# create plot
+set.seed(10052016)
+ggplot(data = MMnet, aes(from_id = from_id, to_id = to_id)) + geom_net(aes(colour = Gender), layout.alg = "kamadakawai",
+size = 2, labelon = TRUE, vjust = -0.6, ecolour = "grey60",
+directed =FALSE, fontsize = 3, ealpha = 0.5) + scale_colour_manual(values = c("#FF69B4", "#0099ff")) + xlim(c(-0.05, 1.05)) +
+theme_net() +
+theme(legend.position = "bottom")
+```
+
+
+## ggnetwork{.tabset}
+
+```{r, message=FALSE}
+library(ggnetwork)
+```
+
+### Anki Tag
+
+```{r}
+# create plot for ggnetwork. uses same data created for ggnet2 function library(ggnetwork)
+set.seed(10052016)
+
+tag.net <- network(edge_weights[,1:2], directed = FALSE) 
+
+# assign weights to the edges of the network
+tag.net %v% "node_color" <- as.character(node_tags_weight$lecture_name)
+tag.net %e% "edge_weight" <- edge_weights$weight / 25
+
+tag.ggnet <- ggnetwork(tag.net, layout = "kamadakawai")
+
+ggplot(data = tag.ggnet, aes(x, y, xend = xend, yend = yend)) +
+  geom_edges(color = "grey50", aes(size = edge_weight), show.legend = FALSE) + # draw edge layer 
+  geom_nodes(aes(color = node_color), size = 3) + # draw node layer 
+  geom_nodetext(aes(color = node_color, label = vertex.names), size = 3, vjust = -0.6) + # draw node label layer 
+  # scale_colour_manual(values = tag.ggnet) +
+  xlim(c(-0.05, 1.05)) + theme_blank() + theme(legend.position = "bottom") %>% 
+  set_theme_params()
+```
+
+
+### E.g. Madmen
+
+```{r}
+# create plot for ggnetwork. uses same data created for ggnet2 function library(ggnetwork)
+set.seed(10052016)
+mm.ggnet <- ggnetwork(mm.net, layout = "kamadakawai")
+ggplot(data = mm.ggnet,
+       aes(x, y, xend = xend, yend = yend)) +
+  geom_edges(color = "grey50") + # draw edge layer 
+  geom_nodes(aes(colour = gender), size = 2) + # draw node layer 
+  geom_nodetext(aes(colour = gender, label = vertex.names),
+                size = 3, vjust = -0.6) + # draw node label layer 
+  scale_colour_manual(values = mm.col) +
+  xlim(c(-0.05, 1.05)) + theme_blank() + theme(legend.position = "bottom")
+```
+
+
+
+
+# Interactive Network Visualization
+
+Notes from [Network visualization with R](https://kateto.net/sunbelt2019)
+
+Section [7 Dynamic network visualizations with ndtv-d3](https://kateto.net/sunbelt2019#dynamic-network-visualizations-with-ndtv-d3)
+
+> We will start from plots of static network portraying a single time point (or an aggregated time period).
+
+
+> As ndtv is part of the Statnet family, it will accept objects from the network package such as the one we created earlier (net3).
 
 ```{r}
 # # install.packages('ndtv', dependencies=T)
@@ -139,7 +462,7 @@ As ndtv is part of the Statnet family, it will accept objects from the network p
 ```
 
 
-Most of the parameters below are self-explanatory at this point (bg is the background color of the plot). Two new parameters we haven’t used before are vertex.tooltip and edge.tooltip. Those contain the information that we can see when moving the mouse cursor over network elements. Note that the tooltip parameters accepts html tags – for example we will use the line break tag <br>. The parameter launchBrowser instructs R to open the resulting visualization file (filename) in the browser.
+> Most of the parameters below are self-explanatory at this point (bg is the background color of the plot). Two new parameters we haven’t used before are vertex.tooltip and edge.tooltip. Those contain the information that we can see when moving the mouse cursor over network elements. Note that the tooltip parameters accepts html tags – for example we will use the line break tag <br>. The parameter launchBrowser instructs R to open the resulting visualization file (filename) in the browser.
 
 
 ```{r}
