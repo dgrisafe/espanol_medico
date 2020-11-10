@@ -11,6 +11,7 @@ library(tidyverse)
 library(cowplot)
 theme_set(theme_cowplot())
 library(sna)
+library(RColorBrewer)
 ```
 
 # Export from Anki
@@ -114,6 +115,9 @@ df_tags <- df_cards %>%
   )
 ```
 
+
+## Analysis Plan
+
 ```{r}
 # count numbers of tags, cards, and lectures
 n_tag     <- length(unique(df_tags$tag_name))
@@ -121,18 +125,65 @@ m_card    <- length(unique(df_tags$card_id))
 k_lecture <- length(unique(df_tags$lecture_name))
 ```
 
-The following will be used to visualize the network  
+### Summarized Lectures
+
+We will first describe the data from the perspective of each lecture  
+
+* Each **lecture** (k = `r k_lecture`) is a **node**
+* Each **card** (m = `r m_card`) represent **edges** or links between tags
+* Each **lecture** (k = `r k_lecture`) will be indicated by a different **color**
+
+### Detailed Tags
+
+We will then visualize the network from each tag, while indicating each lecture by color
 
 * Each **tag** (n = `r n_tag`) is a **node**  
 * Each **card** (m = `r m_card`) represent **edges** or links between tags
 * Each **lecture** (k = `r k_lecture`) will be indicated by a different **color**
 
 
-## Node Matrix{.tabset}
+## Node Matrix
+
+### Summarized Lectures
+
+What is the number of cards if they are counted multiple times for every lecture they belong to?
+
+```{r}
+node_lec_weight <- df_tags %>% 
+  group_by(card_id, lecture_name) %>% 
+  summarise(card_lec_weight = n(), .groups = "drop") 
+  # dplyr::mutate(lec_id = as.integer(lecture_name))
+node_lec_weight %>% glimpse
+```
+
+How many cards are associated with each lecture?
+
+```{r}
+# node matrix of lectures and card weights
+node_lec_cards <- node_lec_weight %>% 
+  group_by(lecture_name) %>% 
+  summarise(card_weight = n(), .groups = "drop")
+node_lec_cards %>% glimpse
+```
+
+```{r}
+# node_cards_weight %>% glimpse
+node_lec_cards %>% 
+  ggplot(aes(x = lecture_name, y = card_weight, fill = lecture_name)) +
+  geom_col() +
+  ylab(paste0("Cards (m = ", m_card, ")")) +
+  xlab(paste0("Lectures (k = ", k_lecture, ")")) +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 20, hjust = 1)
+    ) 
+```
+
+### Detailed Tags{.tabset}
 
 Node matrix with weights
 
-### Tags
+#### Tags
 
 How many cards are there per tag?
 
@@ -153,6 +204,10 @@ node_tags_weight_order <- df_tags %>% group_by(tag_name) %>% summarise(tag_weigh
 # join the tag weights for sorting plot
 node_tags_weight <- node_tags_weight %>% left_join(node_tags_weight_order, by = "tag_name")
 node_tags_weight %>% glimpse
+
+# look for entries with differing card and tag weights 
+#   (i.e., redundant tag names from different lectures)
+# node_tags_weight %>% filter(card_weight != tag_weight) %>% arrange(-tag_weight) %>% glimpse
 ```
 
 ```{r}
@@ -167,9 +222,7 @@ node_tags_weight %>%
   theme(legend.position = "right", legend.title = element_blank(), legend.text = element_text(size = 8))
 ```
 
-
-
-### Cards
+#### Cards
 
 How many tags are there per card?
 
@@ -188,10 +241,14 @@ node_cards_weight %>%
   geom_histogram(binwidth = 1) +
   ylab(paste0("Cards (m = ", m_card, ")")) +
   xlab(paste0("Tags (n = ", n_tag, ")")) +
-  scale_y_continuous(limits = c(0, 300), breaks = seq(0,300, 50))
+  scale_y_continuous(limits = c(0, 300), breaks = seq(0,300, 50)) +
+  coord_flip()
 ```
 
+
 ## Edge Matrix
+
+### Summarized Lectures
 
 ```{r}
 # how to get pairwise comparisons of a variable within each group
@@ -199,22 +256,22 @@ node_cards_weight %>%
 
 # create columns with pairwise comparisons
 # but there is directionality and redundancy
-combo_messy <- df_tags %>%
-  dplyr::group_by(card_id) %>%
-  dplyr::summarise(combo = list(purrr::cross_df(list(a = tag_name, b = tag_name))), .groups = "drop") %>% 
+combo_messy_lec <- df_tags %>%
+  dplyr::group_by(card_id) %>% 
+  dplyr::summarise(combo = list(purrr::cross_df(list(a = lecture_name, b = lecture_name))), .groups = "drop") %>% 
   tidyr::unnest(combo)
-# combo_messy %>% nrow
+# combo_messy_lec %>% nrow
 
 # sort rows of pairwise comparisons so can identify redundant groupings
-combo_clean <- combo_messy %>% dplyr::select(a, b) %>% 
+combo_clean_lec <- combo_messy_lec %>% dplyr::select(a, b) %>% 
   t() %>% as.data.frame() %>% 
   dplyr::mutate_all(sort) %>% t() %>% 
   as.data.frame() %>% 
-  bind_cols(card_id = combo_messy$card_id, .)
-# combo_clean %>% nrow
+  bind_cols(card_id = combo_messy_lec$card_id, .)
+# combo_clean_lec %>% nrow
 
 # clean pairwise comparisons and group to get weights
-edge_weights <- combo_clean %>% 
+edge_weights_lec <- combo_clean_lec %>% 
   # remove comparisons with redundant pairings
   dplyr::filter(V1 != V2) %>% 
   # create single variable that pairs two comparisons
@@ -224,14 +281,56 @@ edge_weights <- combo_clean %>%
   dplyr::summarise(weight = n(), .groups = "drop") %>% 
   # separate pairwise comparisons into 2 variables
   tidyr::separate(col = pair_comp, into = c("from", "to"), sep = "—", remove = TRUE)
-edge_weights %>% glimpse
+edge_weights_lec %>% glimpse
+```
+
+
+### Detailed Tags
+
+```{r}
+# how to get pairwise comparisons of a variable within each group
+# https://intellipaat.com/community/45798/create-combination-of-all-variables-within-a-group
+
+# create columns with pairwise comparisons
+# but there is directionality and redundancy
+combo_messy_tags <- df_tags %>%
+  dplyr::group_by(card_id) %>%
+  dplyr::summarise(combo = list(purrr::cross_df(list(a = tag_name, b = tag_name))), .groups = "drop") %>% 
+  tidyr::unnest(combo)
+# combo_messy_tags %>% nrow
+
+# sort rows of pairwise comparisons so can identify redundant groupings
+combo_clean_tags <- combo_messy_tags %>% dplyr::select(a, b) %>% 
+  t() %>% as.data.frame() %>% 
+  dplyr::mutate_all(sort) %>% t() %>% 
+  as.data.frame() %>% 
+  bind_cols(card_id = combo_messy_tags$card_id, .)
+# combo_clean_tags %>% nrow
+
+# clean pairwise comparisons and group to get weights
+edge_weights_tag <- combo_clean_tags %>% 
+  # remove comparisons with redundant pairings
+  dplyr::filter(V1 != V2) %>% 
+  # create single variable that pairs two comparisons
+  dplyr::mutate(pair_comp = paste(V1, V2, sep = "—")) %>% 
+  # get weights to find repeated associations
+  dplyr::group_by(pair_comp) %>% 
+  dplyr::summarise(weight = n(), .groups = "drop") %>% 
+  # separate pairwise comparisons into 2 variables
+  tidyr::separate(col = pair_comp, into = c("from", "to"), sep = "—", remove = TRUE)
+edge_weights_tag %>% glimpse
 ```
 
 # Style Plots
 
 ```{r}
-tag.col <- c("Jerarquía" = 1, "Historial Médico" = 2, "Signos Vitales" = 3, "Nervios Craneales" = 4, "Neurológico" = 5, "Musculoesquelético" = 6)
+# create vector of colors
+  # display.brewer.all(colorblindFriendly = TRUE) # look at all available colors
+lec_name <- levels(df_tags$lecture_name)
+lec_color <- brewer.pal(n = length(lec_name), "Spectral")
+names(lec_color) <- lec_name
 
+# common theme parameters for plots
 set_theme_params <- function(gg_obj){
   gg_obj + 
     theme(
@@ -242,7 +341,7 @@ set_theme_params <- function(gg_obj){
 }
 ```
 
-# Minimal Plot
+# Minimal Plot{.tabset}
 
 Notes from [Network visualization with R](https://kateto.net/sunbelt2019)
 
@@ -250,13 +349,59 @@ Section [5.2 A ggraph package example (for ggplot2 users)](https://kateto.net/su
 
 Data for examples are [available here](http://www.kateto.net/wordpress/wp-content/uploads/2019/06/sunbelt2019.zip)
 
+```{r, message=FALSE}
+library(igraph)
+library(ggraph)
+```
+
+## Anki Summarized Lectures
+
+```{r}
+# node matrix
+# node_lec_cards %>% glimpse
+
+# edge matrix
+# edge_weights_lec %>% glimpse
+
+net_tag <- graph_from_data_frame(directed=F,
+  vertices = node_lec_cards,
+  d = edge_weights_lec
+  )
+
+# Set edge width based on weight:
+E(net_tag)$width <- E(net_tag)$weight
+
+ggraph(net_tag, layout = 'linear') +
+  geom_edge_arc0(aes(width = width), linetype = 1, color="gray60", strength = 0.9, alpha = 0.5) +
+  geom_node_point(color = lec_color, size = 15, position = position_dodge(1)) +
+  geom_node_text(aes(label = str_wrap(name, 10)), vjust = 0.5, size = 2.4) +
+  theme(
+    legend.position = "none",
+    plot.background = element_rect(size = 10),
+    plot.margin = margin(1, 1, 1, 1, "cm")
+    )
+```
+
+## E.g. Media
+
+```{r}
+# load example data
+nodes <- read.csv("Dataset1-Media-Example-NODES.csv", header=T, as.is=T)
+links <- read.csv("Dataset1-Media-Example-EDGES.csv", header=T, as.is=T)
+# head(nodes)
+# head(links)
+
+# create igraph object
+net <- graph_from_data_frame(d=links, vertices=nodes, directed=T) 
+# net
+```
+
 ```{r}
 ggraph(net, layout = 'linear') + 
     geom_edge_arc(color = "orange", width=0.7) +
     geom_node_point(size=5, color="gray50") +
     theme_void()
 ```
-
 
 
 # Network Visualization
@@ -273,12 +418,12 @@ library(GGally)
 library(network)
 ```
 
-### Anki Tags
+### Anki Detailed Tags
 
 ```{r}
 # data step for both ggnet2 and ggnetwork
 # create undirected network
-tag.net <- network(edge_weights[,1:2], directed = FALSE) 
+tag.net <- network(edge_weights_tag[,1:2], directed = FALSE) 
 tag.net # glance at network object
 
 ## Network attributes:
@@ -299,12 +444,12 @@ tag.net # glance at network object
 tag.net %v% "node_color" <- as.integer(node_tags_weight$lecture_name)
 
 # assign weights to the edges of the network
-tag.net %e% "edge_weight" <- edge_weights$weight / 25
+tag.net %e% "edge_weight" <- edge_weights_tag$weight / 25
 
 set.seed(10052016)
 ggnet2(tag.net, mode = "kamadakawai", labelon = TRUE, 
        edge.size = "edge_weight",
-       color = tag.col[ tag.net %v% "node_color" ],
+       color =  "node_color" ,
        size = 4, 
        vjust = -0.6, label.size = 3)
 ```
@@ -350,12 +495,12 @@ labelon = TRUE, label.color = mm.col[ mm.net %v% "gender" ], size = 2, vjust = -
 library(geomnet)
 ```
 
-### Anki Tag
+### Anki Detailed Tags
 
 ```{r}
 # data step: join the edge and node data with a fortify call 
 TAGnet <- suppressMessages(fortify(
-  as.edgedf(as.data.frame(edge_weights)), 
+  as.edgedf(as.data.frame(edge_weights_tag)), 
   dplyr::select(node_tags_weight, tag_name, card_weight, lecture_name)
   ))
 
@@ -367,15 +512,15 @@ set.seed(1332126)
 ggplot(data = TAGnet, 
        aes(from_id = from_id, to_id = to_id, linewidth = weight/40,
            label = str_wrap(from_id, 20) # wrap labels
-           )) + 
+           )) +
   geom_net(aes(colour = lecture_name), layout.alg = "kamadakawai",
            size = 2, labelon = TRUE, vjust = -0.6, ecolour = "grey60",
            directed = FALSE, fontsize = 1, ealpha = 0.5,
            repel = FALSE, labelcolour = "gray30"
            ) +
-  # scale_colour_manual(values = c("#FF69B4", "#0099ff")) + 
+  scale_colour_manual(values = lec_color) +
   xlim(c(-0.05, 1.05)) +
-  theme_net() %>% 
+  theme_net() %>%
   set_theme_params()
 ```
 
@@ -401,17 +546,17 @@ theme(legend.position = "bottom")
 library(ggnetwork)
 ```
 
-### Anki Tag
+### Anki Detailed Tags
 
 ```{r}
 # create plot for ggnetwork. uses same data created for ggnet2 function library(ggnetwork)
 set.seed(10052016)
 
-tag.net <- network(edge_weights[,1:2], directed = FALSE) 
+tag.net <- network(edge_weights_tag[,1:2], directed = FALSE) 
 
 # assign weights to the edges of the network
 tag.net %v% "node_color" <- as.character(node_tags_weight$lecture_name)
-tag.net %e% "edge_weight" <- edge_weights$weight / 25
+tag.net %e% "edge_weight" <- edge_weights_tag$weight / 25
 
 tag.ggnet <- ggnetwork(tag.net, layout = "kamadakawai")
 
