@@ -30,7 +30,7 @@ GUI procedure for exporting text file of cards from Anki software
 
 ```{r}
 # load the .txt file
-raw_text <- read.delim("medicina.txt", header = FALSE, sep = "\t")
+raw_text <- read.delim("medicina_20201115.txt", header = FALSE, sep = "\t")
 
 # subset the column with the tag names
 tag_names <- data.frame(tag_names = raw_text$V3)
@@ -47,14 +47,17 @@ tag_names <- data.frame(tag_names = raw_text$V3)
     case_when(
       str_detect(x_tag, pattern = "^0") ~ 1,
       str_detect(x_tag, pattern = "^1") ~ 2,
+      # str_detect(x_tag, pattern = "^2") ~ 3,
       str_detect(x_tag, pattern = "^3") ~ 3,
       str_detect(x_tag, pattern = "^4") ~ 4,
       str_detect(x_tag, pattern = "^5") ~ 5,
-      str_detect(x_tag, pattern = "^6") ~ 6
+      str_detect(x_tag, pattern = "^6") ~ 6,
+      str_detect(x_tag, pattern = "^7") ~ 7
       ) %>% 
       factor(
-        levels = 1:6,
-        labels = c("Jerarquía", "Historial Médico", "Signos Vitales", "Nervios Craneales", "Neurológico", "Musculoesquelético")
+        levels = 1:7,
+        labels = c("Jerarquía", "Historial Médico", "Signos Vitales", "Nervios Craneales", "Neurológico", "Musculo-esquelético", "Cardiovascular Respiratorio")
+        # , "Números y Letras"
       )
   }
 
@@ -115,6 +118,25 @@ df_tags <- df_cards %>%
   )
 ```
 
+## Style Plots
+
+```{r}
+# create vector of colors
+  # display.brewer.all(colorblindFriendly = TRUE) # look at all available colors
+lec_name <- levels(df_tags$lecture_name)
+lec_color <- brewer.pal(n = length(lec_name), "Dark2")
+names(lec_color) <- lec_name
+
+# common theme parameters for plots
+set_theme_params <- function(gg_obj){
+  gg_obj + 
+    theme(
+      legend.position = "right",
+      legend.title = element_blank(),
+      legend.text = element_text(size = 8)
+    )
+}
+```
 
 ## Analysis Plan
 
@@ -171,6 +193,7 @@ node_lec_cards %>% glimpse
 node_lec_cards %>% 
   ggplot(aes(x = lecture_name, y = card_weight, fill = lecture_name)) +
   geom_col() +
+  scale_fill_manual(values = as.character(lec_color)) +
   ylab(paste0("Cards (m = ", m_card, ")")) +
   xlab(paste0("Lectures (k = ", k_lecture, ")")) +
   theme(
@@ -215,6 +238,7 @@ node_tags_weight %>% glimpse
 node_tags_weight %>% 
   ggplot(aes(x = fct_reorder(tag_name, tag_weight), y = card_weight, fill = lecture_name)) +
   geom_col() +
+  scale_fill_manual(values = as.character(lec_color)) +
   xlab(paste0("Tags (n = ", n_tag, ")")) +
   ylab(paste0("Cards (m = ", m_card, ")")) +
   theme(axis.text.y = element_text(size = 5, hjust = 1)) +
@@ -241,7 +265,7 @@ node_cards_weight %>%
   geom_histogram(binwidth = 1) +
   ylab(paste0("Cards (m = ", m_card, ")")) +
   xlab(paste0("Tags (n = ", n_tag, ")")) +
-  scale_y_continuous(limits = c(0, 300), breaks = seq(0,300, 50)) +
+  scale_y_continuous(limits = c(0, 400), breaks = seq(0, 400, 50)) +
   coord_flip()
 ```
 
@@ -321,25 +345,6 @@ edge_weights_tag <- combo_clean_tags %>%
 edge_weights_tag %>% glimpse
 ```
 
-# Style Plots
-
-```{r}
-# create vector of colors
-  # display.brewer.all(colorblindFriendly = TRUE) # look at all available colors
-lec_name <- levels(df_tags$lecture_name)
-lec_color <- brewer.pal(n = length(lec_name), "Spectral")
-names(lec_color) <- lec_name
-
-# common theme parameters for plots
-set_theme_params <- function(gg_obj){
-  gg_obj + 
-    theme(
-      legend.position = "right",
-      legend.title = element_blank(),
-      legend.text = element_text(size = 8)
-    )
-}
-```
 
 # Minimal Plot{.tabset}
 
@@ -508,20 +513,21 @@ TAGnet <- suppressMessages(fortify(
 # ?gplot.layout 
 
 # create plot
-set.seed(1332126)
+set.seed(13232123)
 ggplot(data = TAGnet, 
        aes(from_id = from_id, to_id = to_id, linewidth = weight/40,
            label = str_wrap(from_id, 20) # wrap labels
            )) +
-  geom_net(aes(colour = lecture_name), layout.alg = "kamadakawai",
-           size = 2, labelon = TRUE, vjust = -0.6, ecolour = "grey60",
-           directed = FALSE, fontsize = 1, ealpha = 0.5,
+  geom_net(aes(colour = lecture_name, size = card_weight, fontsize = (card_weight/60 + 2)), layout.alg = "kamadakawai",
+           labelon = TRUE, vjust = 0.5, ecolour = "grey60",
+           directed = FALSE, ealpha = 0.5,
            repel = FALSE, labelcolour = "gray30"
            ) +
   scale_colour_manual(values = lec_color) +
   xlim(c(-0.05, 1.05)) +
   theme_net() %>%
-  set_theme_params()
+  set_theme_params() +
+  theme(legend.position = "none")
 ```
 
 
@@ -589,38 +595,90 @@ ggplot(data = mm.ggnet,
 
 
 
-# Interactive Network Visualization
+## Interactive Network Visualization{.tabset}
 
 Notes from [Network visualization with R](https://kateto.net/sunbelt2019)
 
-Section [7 Dynamic network visualizations with ndtv-d3](https://kateto.net/sunbelt2019#dynamic-network-visualizations-with-ndtv-d3)
+Section [6.4 Interactive JS visualization with networkD3](https://kateto.net/sunbelt2019#interactive-js-visualization-with-networkd3)
 
-> We will start from plots of static network portraying a single time point (or an aggregated time period).
+> We will also take a quick look at networkD3 which - as its name suggests - generates interactive network visualizations using the D3 javascript library. If you do not have the networkD3 library, install it with install.packages("networkD3").
 
-
-> As ndtv is part of the Statnet family, it will accept objects from the network package such as the one we created earlier (net3).
-
-```{r}
-# # install.packages('ndtv', dependencies=T)
-# library('ndtv')
-# net3 
+```{r, message=FALSE}
+library(networkD3)
 ```
 
+### Anki Detailed Tags
 
-> Most of the parameters below are self-explanatory at this point (bg is the background color of the plot). Two new parameters we haven’t used before are vertex.tooltip and edge.tooltip. Those contain the information that we can see when moving the mouse cursor over network elements. Note that the tooltip parameters accepts html tags – for example we will use the line break tag <br>. The parameter launchBrowser instructs R to open the resulting visualization file (filename) in the browser.
-
+Transform columns of edge list to numerics that start at zero.
 
 ```{r}
-# par(mar=c(0,0,0,0))
-# 
-# render.d3movie(net3, usearrows = F, displaylabels = F, bg="#111111", 
-#        vertex.border="#ffffff", vertex.col =  net3 %v% "col",
-#        vertex.cex = (net3 %v% "audience.size")/8, 
-#        edge.lwd = (net3 %e% "weight")/3, edge.col = '#55555599',
-#        vertex.tooltip = paste("<b>Name:</b>", (net3 %v% 'media') , "<br>",
-#                               "<b>Type:</b>", (net3 %v% 'type.label')),
-#        edge.tooltip = paste("<b>Edge type:</b>", (net3 %e% 'type'), "<br>", 
-#                             "<b>Edge weight:</b>", (net3 %e% "weight" ) ),
-#        launchBrowser=F, filename="Media-Network.html" ) 
+# links %>% glimpse
+# edge_weights_tag %>% glimpse
+
+tag_links_d3 <- data.frame(
+  from = match(edge_weights_tag$from, node_tags_weight$tag_name) - 1,
+  to = match(edge_weights_tag$to, node_tags_weight$tag_name) - 1,
+  link_width = (edge_weights_tag$weight * 10)
+  )
+```
+
+Arrange the nodes so in the same order as the “source” column in links
+
+```{r}
+# nodes %>% glimpse
+# node_tags_weight %>% glimpse
+
+tag_nodes_d3 <- cbind(
+  idn = factor(node_tags_weight$tag_id, labels=node_tags_weight$tag_name), 
+  node_tags_weight,
+  color_lecture = str_to_lower(lec_color[match(node_tags_weight$lecture_name, names(lec_color))])
+  ) %>% 
+  dplyr::mutate(tag_weight = 4*tag_weight) # scale node size
+```
+
+```{r}
+# color pal for getting java script this example:
+# JS('d3.scaleOrdinal().domain(["1", "2", "3"]).range(["#000000", "#111111", "#222222"])')
+col_node_pal <- paste0(
+  "d3.scaleOrdinal().domain([\"", 
+  paste0(1:7, collapse = '", "'), 
+  "\"]).range([\"", 
+  paste0(lec_color, collapse = '", "'), 
+  "\"])"
+  )
+
+# plot interactive network
+forceNetwork(
+  Links = tag_links_d3, Nodes = tag_nodes_d3, Source = "from", Target = "to",
+  NodeID = "idn", Group = "lecture_name", colourScale = JS(col_node_pal), # linkWidth = "link_width", 
+  linkColour = "#afafaf", fontSize = 20, zoom = F, legend = F,
+  Nodesize = 7, opacity = 0.8, charge = -300, 
+  width = 1000, height = 1000
+  )
+```
+
+### E.g. Media
+
+> The data that this library needs from is in the standard edge list form, with a few little twists. In order for things to work, the node IDs have to be numeric, and they also have to start from 0. An easy was to get there is to transform our character IDs to a factor variable, transform that to numeric, and make sure it starts from zero by subtracting 1.
+
+```{r}
+links.d3 <- data.frame(from=as.numeric(factor(links$from))-1, 
+                       to=as.numeric(factor(links$to))-1 )
+```
+
+> The nodes need to be in the same order as the “source” column in links:
+
+```{r}
+nodes.d3 <- cbind(idn=factor(nodes$media, levels=nodes$media), nodes) 
+```
+
+> Now we can generate the interactive chart. The Group parameter in it is used to color the nodes. Nodesize is not (as one might think) the size of the node, but the number of the column in the node data that should be used for sizing. The charge parameter controls node repulsion (if negative) or attraction (if positive).
+
+```{r}
+forceNetwork(Links = links.d3, Nodes = nodes.d3, Source="from", Target="to",
+               NodeID = "idn", Group = "type.label", linkWidth = 1,
+               linkColour = "#afafaf", fontSize=12, zoom=T, legend=T,
+               Nodesize=6, opacity = 0.8, charge=-300, 
+               width = 600, height = 400)
 ```
 
