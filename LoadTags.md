@@ -3,6 +3,10 @@
 This is a GUI protocol for exporting a text file of cards and tags from Anki software.
 
 ## 1) Anki
+- Browse
+- Filter... "tag:medicina card:cloze"
+- Select all
+- Change Deck... "Medicina"
 
 ## 2) File --> Export
 
