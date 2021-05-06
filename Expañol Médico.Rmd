@@ -385,19 +385,19 @@ net_tag <- graph_from_data_frame(directed=F,
 # Set edge width based on weight:
 E(net_tag)$width <- E(net_tag)$weight
 
-p_net_lecture <- ggraph(net_tag, layout = 'stress') +
-  geom_edge_arc0(aes(width = width/10), linetype = 1, color="gray60", strength = 0.3, alpha = 0.5) +
-  geom_node_point(color = lec_color, size = 15) +
-  geom_node_text(aes(label = str_wrap(name, 10)), vjust = 0.5, size = 1.6) +
-  expand_limits(x = c(-0.75, 0.75), y = c(-1, 1)) +
+p_net_lecture <- ggraph(net_tag, layout = 'linear', circular = T, offset = pi) +
+  geom_edge_arc0(aes(width = width/10), linetype = 1, color="gray60", strength = 1, alpha = 0.5) +
+  geom_node_point(color = lec_color, size = 8) +
+  geom_node_text(aes(label = str_wrap(name, 10)), vjust = 0.5, size = 0.8) +
+  expand_limits(x = c(-1, 1), y = c(-1, 1)) +
   theme( 
     legend.position = "none",
     plot.background = element_rect(size = 10),
-    plot.margin = margin(rep(1, 4), "cm")
+    plot.margin = margin(rep(2, 4), "cm")
     )
 
 png(filename = 'p_net_lecture.png', type = "quartz",
-    width = 7, height = 5, units = 'in', res = 300
+    width = 3, height = 3, units = 'in', res = 600
     )
 p_net_lecture
 dev.off()
