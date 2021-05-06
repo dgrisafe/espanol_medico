@@ -12,25 +12,12 @@ library(cowplot)
 theme_set(theme_cowplot())
 library(sna)
 library(RColorBrewer)
+library(kableExtra)
 ```
-
-# Export from Anki
-
-GUI procedure for exporting text file of cards from Anki software
-
-1) Anki
-
-2) File --> Export
-
-3) Export Window:
-   - Export format: "Notes in Plain Text (*.txt)
-   - Include: "Medicina"
-   - Check: Include tags
-   - Check: Include HTML and media references
 
 ```{r}
 # load the .txt file
-raw_text <- read.delim("medicina_20201115.txt", header = FALSE, sep = "\t")
+raw_text <- read.delim("medicina_20210505_simples.txt", header = FALSE, sep = "\t")
 
 # subset the column with the tag names
 tag_names <- data.frame(tag_names = raw_text$V3)
@@ -45,19 +32,29 @@ tag_names <- data.frame(tag_names = raw_text$V3)
   # lecture factor formatting
   fct_lecture <- function(x_tag){
     case_when(
-      str_detect(x_tag, pattern = "^0") ~ 1,
-      str_detect(x_tag, pattern = "^1") ~ 2,
-      # str_detect(x_tag, pattern = "^2") ~ 3,
-      str_detect(x_tag, pattern = "^3") ~ 3,
-      str_detect(x_tag, pattern = "^4") ~ 4,
-      str_detect(x_tag, pattern = "^5") ~ 5,
-      str_detect(x_tag, pattern = "^6") ~ 6,
-      str_detect(x_tag, pattern = "^7") ~ 7
+      str_detect(x_tag, pattern = "^00") ~ 1,
+      str_detect(x_tag, pattern = "^01") ~ 2,
+      str_detect(x_tag, pattern = "^02") ~ 3,
+      str_detect(x_tag, pattern = "^03") ~ 4,
+      str_detect(x_tag, pattern = "^04") ~ 5,
+      str_detect(x_tag, pattern = "^05") ~ 6,
+      str_detect(x_tag, pattern = "^06") ~ 7,
+      str_detect(x_tag, pattern = "^07") ~ 8,
+      str_detect(x_tag, pattern = "^08") ~ 9,
+      str_detect(x_tag, pattern = "^09") ~ 10,
+      str_detect(x_tag, pattern = "^10") ~ 11,
+      str_detect(x_tag, pattern = "^11") ~ 12,
+      str_detect(x_tag, pattern = "^12") ~ 13,
+      str_detect(x_tag, pattern = "^13") ~ 14
       ) %>% 
       factor(
-        levels = 1:7,
-        labels = c("Jerarquía", "Historial Médico", "Signos Vitales", "Nervios Craneales", "Neurológico", "Musculo-esquelético", "Cardiovascular Respiratorio")
-        # , "Números y Letras"
+        levels = 1:14,
+        labels = c(
+          "Jerarquía",
+          "Historial Médico", "Números y Letras", "Signos Vitales", "Nervios Craneales", "Neurológico",
+          "Musculo-Esquelético", "Cardiovascular Respiratorio", "Oídos, Nariz y Garganta", "Senos", "Ginecológico",
+          "Genitourinario Hombres", "Abdomen", "Salud Mental"
+          )
       )
   }
 
@@ -89,8 +86,11 @@ tag_names <- data.frame(tag_names = raw_text$V3)
 ## Dataframes
 
 ```{r}
+# tags to exclude
+exclude_tags <- c("alimentación", "alzugaray\\_2019\\_preparacion", "CultureAdvantage", "iTalki", "leech", "salud\\_higiene", "verbos\\_expresiones", "Oaxaca2019" , "medicina")
+
 # each row is a card, split tags into individual columns
-n_col <- 9 # max number of tags in any given row
+n_col <- 17 # max number of tags in any given row
 df_cards <- tag_names %>% 
   separate(col = tag_names, sep = "\\s", into = paste0("tag_", 1:n_col), fill = "right", extra = "warn") %>% 
   dplyr::arrange(tag_names) %>% 
@@ -100,10 +100,10 @@ df_cards <- tag_names %>%
 # df_cards %>% glimpse
 
 # each row is a tag
-df_tags <- df_cards %>% 
+df_tags_all <- df_cards %>% 
   pivot_longer(cols = starts_with("tag_"), names_prefix = "tag_", names_to = "tag_n", values_to = "tag_name") %>% 
   # remove unnecessary tags
-  dplyr::mutate(tag_name = str_replace_all(string = tag_name, pattern = "Oaxaca2019|medicina", replacement = NA_character_)) %>%
+  dplyr::mutate(tag_name = str_replace_all(string = tag_name, pattern = paste0(exclude_tags, collapse = "|"), replacement = NA_character_)) %>%
   # eliminate any rows with missing tag names
   dplyr::filter(!is.na(tag_name)) %>% 
   group_by(tag_name) %>% 
@@ -116,6 +116,14 @@ df_tags <- df_cards %>%
     lecture_name = fct_lecture(lecture_id),
     tag_name = prettify_tags(tag_name)
   )
+
+# remove simple/complex tag
+df_tags <- df_tags_all %>% 
+  dplyr::filter(!(tag_name %in% c("Tarjetas Simples", "Tarjetas Complejas"))) %>% 
+  dplyr::filter(!(lecture_name == "Jerarquía"))
+
+# check to see if any tags not being excluded
+# df_tags[is.na(df_tags$lecture_name),]$tag_name %>% unique
 ```
 
 ## Style Plots
@@ -123,8 +131,8 @@ df_tags <- df_cards %>%
 ```{r}
 # create vector of colors
   # display.brewer.all(colorblindFriendly = TRUE) # look at all available colors
-lec_name <- levels(df_tags$lecture_name)
-lec_color <- brewer.pal(n = length(lec_name), "Dark2")
+lec_name <- unique(df_tags$lecture_name)
+lec_color <- colorRampPalette(brewer.pal(8, "Dark2"))(length(lec_name))
 names(lec_color) <- lec_name
 
 # common theme parameters for plots
@@ -133,7 +141,7 @@ set_theme_params <- function(gg_obj){
     theme(
       legend.position = "right",
       legend.title = element_blank(),
-      legend.text = element_text(size = 8)
+      legend.text = element_text(size = 14)
     )
 }
 ```
@@ -185,7 +193,7 @@ How many cards are associated with each lecture?
 node_lec_cards <- node_lec_weight %>% 
   group_by(lecture_name) %>% 
   summarise(card_weight = n(), .groups = "drop")
-node_lec_cards %>% glimpse
+node_lec_cards %>% kable() %>% kable_styling()
 ```
 
 ```{r}
@@ -230,7 +238,7 @@ node_tags_weight %>% glimpse
 
 # look for entries with differing card and tag weights 
 #   (i.e., redundant tag names from different lectures)
-# node_tags_weight %>% filter(card_weight != tag_weight) %>% arrange(-tag_weight) %>% glimpse
+# node_tags_weight %>% dplyr::filter(card_weight != tag_weight) %>% arrange(-tag_weight) %>% glimpse
 ```
 
 ```{r}
@@ -269,7 +277,6 @@ node_cards_weight %>%
   coord_flip()
 ```
 
-
 ## Edge Matrix
 
 ### Summarized Lectures
@@ -293,6 +300,7 @@ combo_clean_lec <- combo_messy_lec %>% dplyr::select(a, b) %>%
   as.data.frame() %>% 
   bind_cols(card_id = combo_messy_lec$card_id, .)
 # combo_clean_lec %>% nrow
+colnames(combo_clean_lec) <- c("card_id", "V1", "V2")
 
 # clean pairwise comparisons and group to get weights
 edge_weights_lec <- combo_clean_lec %>% 
@@ -330,6 +338,7 @@ combo_clean_tags <- combo_messy_tags %>% dplyr::select(a, b) %>%
   as.data.frame() %>% 
   bind_cols(card_id = combo_messy_tags$card_id, .)
 # combo_clean_tags %>% nrow
+colnames(combo_clean_tags) <- c("card_id", "V1", "V2")
 
 # clean pairwise comparisons and group to get weights
 edge_weights_tag <- combo_clean_tags %>% 
@@ -376,16 +385,24 @@ net_tag <- graph_from_data_frame(directed=F,
 # Set edge width based on weight:
 E(net_tag)$width <- E(net_tag)$weight
 
-ggraph(net_tag, layout = 'linear') +
-  geom_edge_arc0(aes(width = width), linetype = 1, color="gray60", strength = 0.9, alpha = 0.5) +
-  geom_node_point(color = lec_color, size = 15, position = position_dodge(1)) +
-  geom_node_text(aes(label = str_wrap(name, 10)), vjust = 0.5, size = 2.4) +
-  theme(
+p_net_lecture <- ggraph(net_tag, layout = 'stress') +
+  geom_edge_arc0(aes(width = width/10), linetype = 1, color="gray60", strength = 0.3, alpha = 0.5) +
+  geom_node_point(color = lec_color, size = 15) +
+  geom_node_text(aes(label = str_wrap(name, 10)), vjust = 0.5, size = 1.6) +
+  expand_limits(x = c(-0.75, 0.75), y = c(-1, 1)) +
+  theme( 
     legend.position = "none",
     plot.background = element_rect(size = 10),
-    plot.margin = margin(1, 1, 1, 1, "cm")
+    plot.margin = margin(rep(1, 4), "cm")
     )
+
+png(filename = 'p_net_lecture.png', type = "quartz",
+    width = 7, height = 5, units = 'in', res = 300
+    )
+p_net_lecture
+dev.off()
 ```
+
 
 ## E.g. Media
 
